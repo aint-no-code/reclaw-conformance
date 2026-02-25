@@ -6,6 +6,7 @@
 
 - `healthz.ok_true`: `/healthz` must return `{ "ok": true }`
 - `info.protocol_version`: `/info` must include `protocolVersion == 3`
+- `channels.unknown_webhook_not_found`: unknown channel webhooks must return HTTP `404` with `error.code == "NOT_FOUND"`
 
 ## Run
 

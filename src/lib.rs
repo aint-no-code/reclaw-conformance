@@ -21,6 +21,7 @@ mod tests {
     struct MockTransport {
         healthz: Option<Value>,
         info: Option<Value>,
+        unknown_webhook: Option<(u16, Value)>,
     }
 
     impl ConformanceTransport for MockTransport {
@@ -37,6 +38,15 @@ mod tests {
                 _ => Err(TransportError::Protocol("unknown path".to_owned())),
             }
         }
+
+        fn post_json(&self, path: &str, _body: &Value) -> Result<(u16, Value), TransportError> {
+            match path {
+                "/channels/nonexistent/webhook" => self.unknown_webhook.clone().ok_or_else(|| {
+                    TransportError::Protocol("missing unknown webhook fixture".to_owned())
+                }),
+                _ => Err(TransportError::Protocol("unknown path".to_owned())),
+            }
+        }
     }
 
     #[test]
@@ -44,11 +54,20 @@ mod tests {
         let transport = MockTransport {
             healthz: Some(json!({ "ok": true })),
             info: Some(json!({ "protocolVersion": EXPECTED_PROTOCOL_VERSION })),
+            unknown_webhook: Some((
+                404,
+                json!({
+                    "ok": false,
+                    "error": {
+                        "code": "NOT_FOUND"
+                    }
+                }),
+            )),
         };
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 2);
+        assert_eq!(report.total, 3);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -58,11 +77,20 @@ mod tests {
         let transport = MockTransport {
             healthz: Some(json!({ "ok": true })),
             info: Some(json!({ "protocolVersion": 9 })),
+            unknown_webhook: Some((
+                404,
+                json!({
+                    "ok": false,
+                    "error": {
+                        "code": "NOT_FOUND"
+                    }
+                }),
+            )),
         };
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 2);
+        assert_eq!(report.total, 3);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes
