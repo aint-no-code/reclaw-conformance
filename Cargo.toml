@@ -1,0 +1,17 @@
+[package]
+name = "reclaw-conformance"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Conformance suite for validating Reclaw/OpenClaw runtime behavior"
+repository = "https://github.com/aint-no-code/reclaw-conformance"
+
+[dependencies]
+clap = { version = "4.5.53", features = ["derive"] }
+reqwest = { version = "0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "2.0.18"
+
+[dev-dependencies]
+once_cell = "1.21.3"
