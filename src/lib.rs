@@ -20,6 +20,7 @@ mod tests {
     #[derive(Default)]
     struct MockTransport {
         healthz: Option<Value>,
+        readyz: Option<Value>,
         info: Option<Value>,
         unknown_webhook: Option<(u16, Value)>,
     }
@@ -31,6 +32,10 @@ mod tests {
                     .healthz
                     .clone()
                     .ok_or_else(|| TransportError::Protocol("missing healthz fixture".to_owned())),
+                "/readyz" => self
+                    .readyz
+                    .clone()
+                    .ok_or_else(|| TransportError::Protocol("missing readyz fixture".to_owned())),
                 "/info" => self
                     .info
                     .clone()
@@ -53,7 +58,11 @@ mod tests {
     fn runner_reports_all_pass_when_invariants_hold() {
         let transport = MockTransport {
             healthz: Some(json!({ "ok": true })),
-            info: Some(json!({ "protocolVersion": EXPECTED_PROTOCOL_VERSION })),
+            readyz: Some(json!({ "ok": true })),
+            info: Some(json!({
+                "protocolVersion": EXPECTED_PROTOCOL_VERSION,
+                "methods": ["health", "status"]
+            })),
             unknown_webhook: Some((
                 404,
                 json!({
@@ -67,7 +76,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 3);
+        assert_eq!(report.total, 5);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -76,7 +85,11 @@ mod tests {
     fn runner_reports_failure_for_invalid_protocol_version() {
         let transport = MockTransport {
             healthz: Some(json!({ "ok": true })),
-            info: Some(json!({ "protocolVersion": 9 })),
+            readyz: Some(json!({ "ok": true })),
+            info: Some(json!({
+                "protocolVersion": 9,
+                "methods": ["health", "status"]
+            })),
             unknown_webhook: Some((
                 404,
                 json!({
@@ -90,7 +103,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 3);
+        assert_eq!(report.total, 5);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes

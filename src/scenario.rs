@@ -5,15 +5,19 @@ use crate::{ConformanceOutcome, ConformanceTransport, EXPECTED_PROTOCOL_VERSION}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scenario {
     HealthzOkTrue,
+    ReadyzOkTrue,
     InfoProtocolVersion,
+    InfoMethodsIncludeHealthAndStatus,
     UnknownChannelWebhookNotFound,
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 3] {
+    pub fn all() -> [Self; 5] {
         [
             Self::HealthzOkTrue,
+            Self::ReadyzOkTrue,
             Self::InfoProtocolVersion,
+            Self::InfoMethodsIncludeHealthAndStatus,
             Self::UnknownChannelWebhookNotFound,
         ]
     }
@@ -21,7 +25,11 @@ impl Scenario {
     pub fn run<T: ConformanceTransport>(&self, transport: &T) -> ConformanceOutcome {
         match self {
             Self::HealthzOkTrue => run_healthz(transport),
+            Self::ReadyzOkTrue => run_readyz(transport),
             Self::InfoProtocolVersion => run_info_protocol_version(transport),
+            Self::InfoMethodsIncludeHealthAndStatus => {
+                run_info_methods_include_health_and_status(transport)
+            }
             Self::UnknownChannelWebhookNotFound => run_unknown_channel_webhook_not_found(transport),
         }
     }
@@ -55,6 +63,34 @@ fn run_healthz<T: ConformanceTransport>(transport: &T) -> ConformanceOutcome {
     }
 }
 
+fn run_readyz<T: ConformanceTransport>(transport: &T) -> ConformanceOutcome {
+    let name = "readyz.ok_true";
+
+    match transport.get_json("/readyz") {
+        Ok(payload) => {
+            let ok = payload.get("ok").and_then(Value::as_bool).unwrap_or(false);
+            if ok {
+                ConformanceOutcome {
+                    name,
+                    passed: true,
+                    detail: "ready endpoint returned ok=true".to_owned(),
+                }
+            } else {
+                ConformanceOutcome {
+                    name,
+                    passed: false,
+                    detail: "ready endpoint did not return {\"ok\":true}".to_owned(),
+                }
+            }
+        }
+        Err(error) => ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("ready endpoint request failed: {error}"),
+        },
+    }
+}
+
 fn run_info_protocol_version<T: ConformanceTransport>(transport: &T) -> ConformanceOutcome {
     let name = "info.protocol_version";
 
@@ -80,6 +116,51 @@ fn run_info_protocol_version<T: ConformanceTransport>(transport: &T) -> Conforma
                     passed: false,
                     detail: "info endpoint missing numeric protocolVersion".to_owned(),
                 },
+            }
+        }
+        Err(error) => ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("info endpoint request failed: {error}"),
+        },
+    }
+}
+
+fn run_info_methods_include_health_and_status<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "info.methods_include_health_status";
+
+    match transport.get_json("/info") {
+        Ok(payload) => {
+            let methods = payload
+                .get("methods")
+                .and_then(Value::as_array)
+                .map(|values| {
+                    values
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            let has_health = methods.iter().any(|method| method == "health");
+            let has_status = methods.iter().any(|method| method == "status");
+            if has_health && has_status {
+                ConformanceOutcome {
+                    name,
+                    passed: true,
+                    detail: "info.methods includes health and status".to_owned(),
+                }
+            } else {
+                ConformanceOutcome {
+                    name,
+                    passed: false,
+                    detail: format!(
+                        "expected info.methods to include health and status, found {methods:?}"
+                    ),
+                }
             }
         }
         Err(error) => ConformanceOutcome {
