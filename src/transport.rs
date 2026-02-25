@@ -1,10 +1,14 @@
+use std::net::TcpStream;
+
 use reqwest::{blocking::Client, StatusCode};
 use serde_json::Value;
 use thiserror::Error;
+use tungstenite::{connect, stream::MaybeTlsStream, Message, WebSocket};
 
 pub trait ConformanceTransport {
     fn get_json(&self, path: &str) -> Result<Value, TransportError>;
     fn post_json(&self, path: &str, body: &Value) -> Result<(u16, Value), TransportError>;
+    fn websocket_first_response(&self, frame: &Value) -> Result<Value, TransportError>;
 }
 
 pub struct HttpTransport {
@@ -67,6 +71,15 @@ impl ConformanceTransport for HttpTransport {
 
         Ok((status, payload))
     }
+
+    fn websocket_first_response(&self, frame: &Value) -> Result<Value, TransportError> {
+        let ws_url = websocket_url(&self.base_url);
+        let (mut socket, _) = connect(ws_url.as_str())
+            .map_err(|error| TransportError::Http(format!("websocket connect failed: {error}")))?;
+
+        send_ws_json(&mut socket, frame)?;
+        read_ws_json(&mut socket)
+    }
 }
 
 fn normalize_base_url(input: String) -> Result<String, TransportError> {
@@ -95,6 +108,63 @@ fn normalize_path(path: &str) -> String {
     }
 }
 
+fn websocket_url(base_url: &str) -> String {
+    if let Some(host) = base_url.strip_prefix("http://") {
+        format!("ws://{host}/ws")
+    } else if let Some(host) = base_url.strip_prefix("https://") {
+        format!("wss://{host}/ws")
+    } else {
+        format!("{base_url}/ws")
+    }
+}
+
+fn send_ws_json(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+    payload: &Value,
+) -> Result<(), TransportError> {
+    let encoded = serde_json::to_string(payload).map_err(|error| {
+        TransportError::Protocol(format!("failed to encode websocket frame: {error}"))
+    })?;
+    socket
+        .send(Message::Text(encoded.into()))
+        .map_err(|error| TransportError::Http(format!("websocket send failed: {error}")))
+}
+
+fn read_ws_json(
+    socket: &mut WebSocket<MaybeTlsStream<TcpStream>>,
+) -> Result<Value, TransportError> {
+    loop {
+        let message = socket
+            .read()
+            .map_err(|error| TransportError::Http(format!("websocket read failed: {error}")))?;
+
+        match message {
+            Message::Text(text) => {
+                return serde_json::from_str(text.as_ref()).map_err(|error| {
+                    TransportError::Protocol(format!("invalid websocket frame JSON: {error}"))
+                });
+            }
+            Message::Ping(payload) => {
+                socket.send(Message::Pong(payload)).map_err(|error| {
+                    TransportError::Http(format!("websocket pong failed: {error}"))
+                })?;
+            }
+            Message::Pong(_) => continue,
+            Message::Close(_) => {
+                return Err(TransportError::Protocol(
+                    "websocket closed before response".to_owned(),
+                ));
+            }
+            Message::Binary(_) => {
+                return Err(TransportError::Protocol(
+                    "unexpected binary websocket frame".to_owned(),
+                ));
+            }
+            Message::Frame(_) => continue,
+        }
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum TransportError {
     #[error("http transport error: {0}")]
@@ -109,11 +179,13 @@ mod tests {
     use std::{
         io::{Read, Write},
         net::TcpListener,
+        thread,
     };
 
     use serde_json::json;
+    use tungstenite::{accept, Message};
 
-    use crate::transport::{ConformanceTransport, HttpTransport};
+    use crate::transport::{websocket_url, ConformanceTransport, HttpTransport};
 
     use crate::transport::normalize_base_url;
 
@@ -166,6 +238,64 @@ mod tests {
 
         assert_eq!(status, 404);
         assert_eq!(payload["error"]["code"], "NOT_FOUND");
+        let _ = server.join();
+    }
+
+    #[test]
+    fn websocket_url_maps_http_scheme_to_ws() {
+        assert_eq!(
+            websocket_url("http://127.0.0.1:18789"),
+            "ws://127.0.0.1:18789/ws"
+        );
+        assert_eq!(websocket_url("https://example.com"), "wss://example.com/ws");
+    }
+
+    #[test]
+    fn websocket_first_response_returns_json_payload() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let addr = listener
+            .local_addr()
+            .expect("listener should expose local addr");
+
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().expect("connection should arrive");
+            let mut ws = accept(stream).expect("websocket handshake should succeed");
+
+            let request = ws.read().expect("request frame should arrive");
+            let text = request.into_text().expect("request frame should be text");
+            let parsed: serde_json::Value =
+                serde_json::from_str(text.as_ref()).expect("frame JSON should parse");
+            assert_eq!(parsed["id"], "bad-1");
+
+            ws.send(Message::Text(
+                json!({
+                    "type": "res",
+                    "id": "bad-1",
+                    "ok": false,
+                    "error": {
+                        "code": "INVALID_REQUEST",
+                        "message": "first request must be connect"
+                    }
+                })
+                .to_string()
+                .into(),
+            ))
+            .expect("response should be sent");
+        });
+
+        let transport =
+            HttpTransport::new(format!("http://{addr}")).expect("transport should construct");
+        let response = transport
+            .websocket_first_response(&json!({
+                "type": "req",
+                "id": "bad-1",
+                "method": "health",
+                "params": {}
+            }))
+            .expect("response should be received");
+
+        assert_eq!(response["id"], "bad-1");
+        assert_eq!(response["error"]["code"], "INVALID_REQUEST");
         let _ = server.join();
     }
 }

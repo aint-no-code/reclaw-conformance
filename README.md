@@ -9,6 +9,7 @@
 - `info.protocol_version`: `/info` must include `protocolVersion == 3`
 - `info.methods_include_health_status`: `/info` must expose method list entries for `health` and `status`
 - `channels.unknown_webhook_not_found`: unknown channel webhooks must return HTTP `404` with `error.code == "NOT_FOUND"`
+- `ws.handshake_requires_connect_first_frame`: WS gateway must reject a non-`connect` first request with `INVALID_REQUEST`
 
 ## Run
 

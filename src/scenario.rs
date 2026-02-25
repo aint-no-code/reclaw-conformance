@@ -9,16 +9,18 @@ pub enum Scenario {
     InfoProtocolVersion,
     InfoMethodsIncludeHealthAndStatus,
     UnknownChannelWebhookNotFound,
+    WsHandshakeRequiresConnectFirstFrame,
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 5] {
+    pub fn all() -> [Self; 6] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
             Self::InfoProtocolVersion,
             Self::InfoMethodsIncludeHealthAndStatus,
             Self::UnknownChannelWebhookNotFound,
+            Self::WsHandshakeRequiresConnectFirstFrame,
         ]
     }
 
@@ -31,6 +33,9 @@ impl Scenario {
                 run_info_methods_include_health_and_status(transport)
             }
             Self::UnknownChannelWebhookNotFound => run_unknown_channel_webhook_not_found(transport),
+            Self::WsHandshakeRequiresConnectFirstFrame => {
+                run_ws_handshake_requires_connect_first_frame(transport)
+            }
         }
     }
 }
@@ -204,6 +209,49 @@ fn run_unknown_channel_webhook_not_found<T: ConformanceTransport>(
             name,
             passed: false,
             detail: format!("unknown channel webhook request failed: {error}"),
+        },
+    }
+}
+
+fn run_ws_handshake_requires_connect_first_frame<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.handshake_requires_connect_first_frame";
+    let request = serde_json::json!({
+        "type": "req",
+        "id": "conformance-handshake-invalid-1",
+        "method": "health",
+        "params": {}
+    });
+
+    match transport.websocket_first_response(&request) {
+        Ok(response) => {
+            let ok = response.get("ok").and_then(Value::as_bool).unwrap_or(true);
+            let code = response
+                .get("error")
+                .and_then(|error| error.get("code"))
+                .and_then(Value::as_str);
+
+            if !ok && code == Some("INVALID_REQUEST") {
+                ConformanceOutcome {
+                    name,
+                    passed: true,
+                    detail: "ws handshake rejects non-connect first request".to_owned(),
+                }
+            } else {
+                ConformanceOutcome {
+                    name,
+                    passed: false,
+                    detail: format!(
+                        "expected ok=false and error.code=INVALID_REQUEST, found ok={ok}, error.code={code:?}"
+                    ),
+                }
+            }
+        }
+        Err(error) => ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("websocket handshake request failed: {error}"),
         },
     }
 }

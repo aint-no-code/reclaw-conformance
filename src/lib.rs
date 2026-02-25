@@ -23,6 +23,7 @@ mod tests {
         readyz: Option<Value>,
         info: Option<Value>,
         unknown_webhook: Option<(u16, Value)>,
+        websocket_response: Option<Value>,
     }
 
     impl ConformanceTransport for MockTransport {
@@ -52,6 +53,12 @@ mod tests {
                 _ => Err(TransportError::Protocol("unknown path".to_owned())),
             }
         }
+
+        fn websocket_first_response(&self, _frame: &Value) -> Result<Value, TransportError> {
+            self.websocket_response.clone().ok_or_else(|| {
+                TransportError::Protocol("missing websocket response fixture".to_owned())
+            })
+        }
     }
 
     #[test]
@@ -72,11 +79,19 @@ mod tests {
                     }
                 }),
             )),
+            websocket_response: Some(json!({
+                "type": "res",
+                "id": "conformance-handshake-invalid-1",
+                "ok": false,
+                "error": {
+                    "code": "INVALID_REQUEST"
+                }
+            })),
         };
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 5);
+        assert_eq!(report.total, 6);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -99,11 +114,19 @@ mod tests {
                     }
                 }),
             )),
+            websocket_response: Some(json!({
+                "type": "res",
+                "id": "conformance-handshake-invalid-1",
+                "ok": false,
+                "error": {
+                    "code": "INVALID_REQUEST"
+                }
+            })),
         };
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 5);
+        assert_eq!(report.total, 6);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes
