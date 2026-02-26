@@ -10,6 +10,8 @@
 - `info.methods_include_health_status`: `/info` must expose method list entries for `health` and `status`
 - `channels.unknown_webhook_not_found`: unknown channel webhooks must return HTTP `404` with `error.code == "NOT_FOUND"`
 - `ws.handshake_requires_connect_first_frame`: WS gateway must reject a non-`connect` first request with `INVALID_REQUEST`
+- `ws.channels_status_includes_account_views`: `channels.status` must expose account-aware summary views (`channelsById`, `channelAccounts`, `channelDefaultAccountId`)
+- `ws.channels_logout_account_persists`: `channels.logout` with `accountId` must persist account-specific disconnected state
 - `ws.agent_deferred_wait_completes`: deferred `agent` runs must transition `queued -> completed` through `agent.wait`
 - `ws.chat_send_deferred_wait_completes`: deferred `chat.send` runs must return `queued` and complete through `agent.wait`
 - `ws.chat_abort_cancels_deferred_run`: `chat.abort` must cancel deferred runs and `agent.wait` must report `aborted`

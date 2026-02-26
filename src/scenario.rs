@@ -12,6 +12,8 @@ pub enum Scenario {
     InfoMethodsIncludeHealthAndStatus,
     UnknownChannelWebhookNotFound,
     WsHandshakeRequiresConnectFirstFrame,
+    WsChannelsStatusIncludesAccountViews,
+    WsChannelsLogoutAccountPersists,
     WsAgentDeferredWaitCompletes,
     WsChatSendDeferredWaitCompletes,
     WsChatAbortCancelsDeferredRun,
@@ -24,7 +26,7 @@ pub enum Scenario {
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 15] {
+    pub fn all() -> [Self; 17] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
@@ -32,6 +34,8 @@ impl Scenario {
             Self::InfoMethodsIncludeHealthAndStatus,
             Self::UnknownChannelWebhookNotFound,
             Self::WsHandshakeRequiresConnectFirstFrame,
+            Self::WsChannelsStatusIncludesAccountViews,
+            Self::WsChannelsLogoutAccountPersists,
             Self::WsAgentDeferredWaitCompletes,
             Self::WsChatSendDeferredWaitCompletes,
             Self::WsChatAbortCancelsDeferredRun,
@@ -55,6 +59,12 @@ impl Scenario {
             Self::UnknownChannelWebhookNotFound => run_unknown_channel_webhook_not_found(transport),
             Self::WsHandshakeRequiresConnectFirstFrame => {
                 run_ws_handshake_requires_connect_first_frame(transport)
+            }
+            Self::WsChannelsStatusIncludesAccountViews => {
+                run_ws_channels_status_includes_account_views(transport)
+            }
+            Self::WsChannelsLogoutAccountPersists => {
+                run_ws_channels_logout_account_persists(transport)
             }
             Self::WsAgentDeferredWaitCompletes => run_ws_agent_deferred_wait_completes(transport),
             Self::WsChatSendDeferredWaitCompletes => {
@@ -296,6 +306,180 @@ fn run_ws_handshake_requires_connect_first_frame<T: ConformanceTransport>(
             passed: false,
             detail: format!("websocket handshake request failed: {error}"),
         },
+    }
+}
+
+fn run_ws_channels_status_includes_account_views<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.channels_status_includes_account_views";
+    let run_id = unique_run_id("conformance-channels-status");
+    let connect = ws_connect_frame(&format!("{run_id}-connect"));
+    let status = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-status"),
+        "method": "channels.status",
+        "params": {}
+    });
+
+    let responses = match transport.websocket_exchange(&[connect, status]) {
+        Ok(responses) => responses,
+        Err(error) => {
+            return ConformanceOutcome {
+                name,
+                passed: false,
+                detail: format!("websocket exchange failed: {error}"),
+            };
+        }
+    };
+    if responses.len() != 2 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 2 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let payload = responses[1].get("payload").cloned().unwrap_or(Value::Null);
+    let has_channels_list = payload.get("channels").is_some_and(Value::is_array);
+    let has_channel_order = payload.get("channelOrder").is_some_and(Value::is_array);
+    let has_channel_labels = payload.get("channelLabels").is_some_and(Value::is_object);
+    let has_channels_by_id = payload.get("channelsById").is_some_and(Value::is_object);
+    let has_channel_accounts = payload.get("channelAccounts").is_some_and(Value::is_object);
+    let has_channel_default_account_id = payload
+        .get("channelDefaultAccountId")
+        .is_some_and(Value::is_object);
+    let webchat_default = payload
+        .get("channelDefaultAccountId")
+        .and_then(|value| value.get("webchat"))
+        .and_then(Value::as_str);
+    let webchat_connected = payload
+        .get("channelsById")
+        .and_then(|value| value.get("webchat"))
+        .and_then(|value| value.get("connected"))
+        .and_then(Value::as_bool);
+
+    if connect_ok
+        && has_channels_list
+        && has_channel_order
+        && has_channel_labels
+        && has_channels_by_id
+        && has_channel_accounts
+        && has_channel_default_account_id
+        && webchat_default == Some("default")
+        && webchat_connected == Some(true)
+    {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "channels.status includes account-aware channel summary views".to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected channel account views, found channels={has_channels_list}, order={has_channel_order}, labels={has_channel_labels}, byId={has_channels_by_id}, accounts={has_channel_accounts}, defaults={has_channel_default_account_id}, webchatDefault={webchat_default:?}, webchatConnected={webchat_connected:?}"
+            ),
+        }
+    }
+}
+
+fn run_ws_channels_logout_account_persists<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.channels_logout_account_persists";
+    let run_id = unique_run_id("conformance-channels-logout");
+    let connect = ws_connect_frame(&format!("{run_id}-connect"));
+    let logout = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-logout"),
+        "method": "channels.logout",
+        "params": {
+            "channel": "webchat",
+            "accountId": "ops",
+        }
+    });
+    let status = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-status"),
+        "method": "channels.status",
+        "params": {}
+    });
+
+    let responses = match transport.websocket_exchange(&[connect, logout, status]) {
+        Ok(responses) => responses,
+        Err(error) => {
+            return ConformanceOutcome {
+                name,
+                passed: false,
+                detail: format!("websocket exchange failed: {error}"),
+            };
+        }
+    };
+    if responses.len() != 3 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 3 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let logout_ok = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("loggedOut"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let logout_account = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("accountId"))
+        .and_then(Value::as_str);
+    let ops_persisted = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("channelAccounts"))
+        .and_then(|payload| payload.get("webchat"))
+        .and_then(Value::as_array)
+        .is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry.get("accountId").and_then(Value::as_str) == Some("ops")
+                    && entry.get("connected").and_then(Value::as_bool) == Some(false)
+            })
+        });
+    let webchat_connected = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("channelsById"))
+        .and_then(|payload| payload.get("webchat"))
+        .and_then(|entry| entry.get("connected"))
+        .and_then(Value::as_bool);
+
+    if connect_ok
+        && logout_ok
+        && logout_account == Some("ops")
+        && ops_persisted
+        && webchat_connected == Some(true)
+    {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "channels.logout(accountId) persists account-specific disconnected state"
+                .to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected account-aware logout persistence, found loggedOut={logout_ok}, accountId={logout_account:?}, opsPersisted={ops_persisted}, webchatConnected={webchat_connected:?}"
+            ),
+        }
     }
 }
 

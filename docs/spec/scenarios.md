@@ -13,6 +13,20 @@
 - Requirement: body includes numeric `protocolVersion`
 - Requirement: `protocolVersion == 3`
 
+## `ws.channels_status_includes_account_views`
+
+- Surface: WebSocket `/ws`
+- Requirement: `channels.status` response includes `channels`, `channelOrder`, `channelLabels`
+- Requirement: response includes account-aware views: `channelsById`, `channelAccounts`, `channelDefaultAccountId`
+- Requirement: default `webchat` account is represented as `channelDefaultAccountId.webchat == "default"`
+
+## `ws.channels_logout_account_persists`
+
+- Surface: WebSocket `/ws`
+- Requirement: `channels.logout` accepts `accountId` and returns it in payload
+- Requirement: subsequent `channels.status` includes the account in `channelAccounts`
+- Requirement: disconnected account does not force aggregated channel summary disconnected if other accounts remain connected
+
 ## `ws.agent_deferred_wait_completes`
 
 - Surface: WebSocket `/ws`

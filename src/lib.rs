@@ -98,6 +98,126 @@ mod tests {
                 ]);
             }
 
+            if methods.as_slice() == ["connect", "channels.status"] {
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "ts": 1,
+                            "channels": [{
+                                "id": "webchat",
+                                "connected": true,
+                                "kind": "internal"
+                            }],
+                            "channelOrder": ["webchat"],
+                            "channelLabels": { "webchat": "webchat" },
+                            "channelMeta": {
+                                "webchat": {
+                                    "kind": "internal",
+                                    "label": "webchat"
+                                }
+                            },
+                            "channelsById": {
+                                "webchat": {
+                                    "connected": true,
+                                    "kind": "internal"
+                                }
+                            },
+                            "channelAccounts": {
+                                "webchat": [{
+                                    "accountId": "default",
+                                    "connected": true,
+                                    "kind": "internal",
+                                    "loggedOutAtMs": Value::Null
+                                }]
+                            },
+                            "channelDefaultAccountId": {
+                                "webchat": "default"
+                            }
+                        }
+                    }),
+                ]);
+            }
+
+            if methods.as_slice() == ["connect", "channels.logout", "channels.status"] {
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "ok": true,
+                            "channel": "webchat",
+                            "accountId": "ops",
+                            "loggedOut": true
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "ts": 2,
+                            "channels": [
+                                {
+                                    "id": "webchat",
+                                    "connected": true,
+                                    "kind": "internal"
+                                },
+                                {
+                                    "id": "webchat",
+                                    "accountId": "ops",
+                                    "connected": false,
+                                    "kind": "internal",
+                                    "loggedOutAtMs": 42
+                                }
+                            ],
+                            "channelOrder": ["webchat"],
+                            "channelLabels": { "webchat": "webchat" },
+                            "channelMeta": {
+                                "webchat": {
+                                    "kind": "internal",
+                                    "label": "webchat"
+                                }
+                            },
+                            "channelsById": {
+                                "webchat": {
+                                    "connected": true,
+                                    "kind": "internal"
+                                }
+                            },
+                            "channelAccounts": {
+                                "webchat": [
+                                    {
+                                        "accountId": "default",
+                                        "connected": true,
+                                        "kind": "internal",
+                                        "loggedOutAtMs": Value::Null
+                                    },
+                                    {
+                                        "accountId": "ops",
+                                        "connected": false,
+                                        "kind": "internal",
+                                        "loggedOutAtMs": 42
+                                    }
+                                ]
+                            },
+                            "channelDefaultAccountId": {
+                                "webchat": "default"
+                            }
+                        }
+                    }),
+                ]);
+            }
+
             if methods.as_slice() == ["connect", "chat.send", "agent.wait"] {
                 let chat_params = frames[1].get("params").ok_or_else(|| {
                     TransportError::Protocol(
@@ -559,7 +679,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 15);
+        assert_eq!(report.total, 17);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -594,7 +714,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 15);
+        assert_eq!(report.total, 17);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes
