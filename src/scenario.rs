@@ -14,10 +14,11 @@ pub enum Scenario {
     WsHandshakeRequiresConnectFirstFrame,
     WsAgentDeferredWaitCompletes,
     WsChatAbortCancelsDeferredRun,
+    WsChatAbortSessionWideCancelsRuns,
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 8] {
+    pub fn all() -> [Self; 9] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
@@ -27,6 +28,7 @@ impl Scenario {
             Self::WsHandshakeRequiresConnectFirstFrame,
             Self::WsAgentDeferredWaitCompletes,
             Self::WsChatAbortCancelsDeferredRun,
+            Self::WsChatAbortSessionWideCancelsRuns,
         ]
     }
 
@@ -45,6 +47,9 @@ impl Scenario {
             Self::WsAgentDeferredWaitCompletes => run_ws_agent_deferred_wait_completes(transport),
             Self::WsChatAbortCancelsDeferredRun => {
                 run_ws_chat_abort_cancels_deferred_run(transport)
+            }
+            Self::WsChatAbortSessionWideCancelsRuns => {
+                run_ws_chat_abort_session_wide_cancels_runs(transport)
             }
         }
     }
@@ -470,6 +475,152 @@ fn run_ws_chat_abort_cancels_deferred_run<T: ConformanceTransport>(
             passed: false,
             detail: format!(
                 "expected abort lifecycle, found summary={queued_summary:?}, aborted={abort_ok}, status={wait_status:?}, sessionKey={wait_session_key:?}, outputIsNull={wait_output_is_null}"
+            ),
+        }
+    }
+}
+
+fn run_ws_chat_abort_session_wide_cancels_runs<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.chat_abort_session_wide_cancels_runs";
+    let session_id = unique_run_id("conformance-abort-all");
+    let run_id_one = format!("{session_id}-one");
+    let run_id_two = format!("{session_id}-two");
+    let session_key = format!("agent:main:{session_id}");
+
+    let connect = ws_connect_frame(&format!("{session_id}-connect"));
+    let first = serde_json::json!({
+        "type": "req",
+        "id": format!("{session_id}-agent-1"),
+        "method": "agent",
+        "params": {
+            "runId": run_id_one,
+            "sessionKey": session_key,
+            "agentId": "main",
+            "input": "abort all one",
+            "deferred": true,
+        }
+    });
+    let second = serde_json::json!({
+        "type": "req",
+        "id": format!("{session_id}-agent-2"),
+        "method": "agent",
+        "params": {
+            "runId": run_id_two,
+            "sessionKey": session_key,
+            "agentId": "main",
+            "input": "abort all two",
+            "deferred": true,
+        }
+    });
+    let abort = serde_json::json!({
+        "type": "req",
+        "id": format!("{session_id}-abort"),
+        "method": "chat.abort",
+        "params": {
+            "sessionKey": session_key,
+        }
+    });
+    let wait_one = serde_json::json!({
+        "type": "req",
+        "id": format!("{session_id}-wait-1"),
+        "method": "agent.wait",
+        "params": {
+            "runId": run_id_one,
+            "timeoutMs": 2000
+        }
+    });
+    let wait_two = serde_json::json!({
+        "type": "req",
+        "id": format!("{session_id}-wait-2"),
+        "method": "agent.wait",
+        "params": {
+            "runId": run_id_two,
+            "timeoutMs": 2000
+        }
+    });
+
+    let responses =
+        match transport.websocket_exchange(&[connect, first, second, abort, wait_one, wait_two]) {
+            Ok(responses) => responses,
+            Err(error) => {
+                return ConformanceOutcome {
+                    name,
+                    passed: false,
+                    detail: format!("websocket exchange failed: {error}"),
+                };
+            }
+        };
+    if responses.len() != 6 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 6 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let queued_one = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("summary"))
+        .and_then(Value::as_str);
+    let queued_two = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("summary"))
+        .and_then(Value::as_str);
+    let abort_ok = responses[3]
+        .get("payload")
+        .and_then(|payload| payload.get("aborted"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let abort_ids = responses[3]
+        .get("payload")
+        .and_then(|payload| payload.get("runIds"))
+        .and_then(Value::as_array);
+    let wait_one_status = responses[4]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+    let wait_two_status = responses[5]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+
+    let has_run_one = abort_ids.is_some_and(|values| {
+        values
+            .iter()
+            .any(|value| value.as_str() == Some(run_id_one.as_str()))
+    });
+    let has_run_two = abort_ids.is_some_and(|values| {
+        values
+            .iter()
+            .any(|value| value.as_str() == Some(run_id_two.as_str()))
+    });
+
+    if connect_ok
+        && queued_one == Some("queued")
+        && queued_two == Some("queued")
+        && abort_ok
+        && has_run_one
+        && has_run_two
+        && wait_one_status == Some("aborted")
+        && wait_two_status == Some("aborted")
+    {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "chat.abort without runId cancels all session deferred runs".to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected session-wide abort lifecycle, found queuedOne={queued_one:?}, queuedTwo={queued_two:?}, aborted={abort_ok}, hasRunOne={has_run_one}, hasRunTwo={has_run_two}, waitOne={wait_one_status:?}, waitTwo={wait_two_status:?}"
             ),
         }
     }

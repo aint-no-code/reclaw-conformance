@@ -12,6 +12,7 @@
 - `ws.handshake_requires_connect_first_frame`: WS gateway must reject a non-`connect` first request with `INVALID_REQUEST`
 - `ws.agent_deferred_wait_completes`: deferred `agent` runs must transition `queued -> completed` through `agent.wait`
 - `ws.chat_abort_cancels_deferred_run`: `chat.abort` must cancel deferred runs and `agent.wait` must report `aborted`
+- `ws.chat_abort_session_wide_cancels_runs`: `chat.abort` without `runId` must cancel all non-terminal runs for the session
 
 ## Run
 
