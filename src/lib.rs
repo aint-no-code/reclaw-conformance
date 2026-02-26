@@ -61,9 +61,10 @@ mod tests {
                         .get("args")
                         .and_then(|args| args.get("method"))
                         .and_then(Value::as_str)
+                        .or_else(|| body.get("action").and_then(Value::as_str))
                         .ok_or_else(|| {
                             TransportError::Protocol(
-                                "missing tools invoke method in fixture request".to_owned(),
+                                "missing tools invoke method/action in fixture request".to_owned(),
                             )
                         })?;
                     if tool != "gateway.request" || method != "health" {
@@ -713,7 +714,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 18);
+        assert_eq!(report.total, 19);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -757,7 +758,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 18);
+        assert_eq!(report.total, 19);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes

@@ -26,6 +26,12 @@
 - Requirement: `tool == "gateway.request"` with `args.method == "health"` returns HTTP `200`
 - Requirement: response includes `{ "ok": true, "result": { "ok": true } }`
 
+## `tools.invoke_gateway_request_action_fallback`
+
+- Endpoint: `POST /tools/invoke`
+- Requirement: `tool == "gateway.request"` with `action == "health"` and empty `args` returns HTTP `200`
+- Requirement: response includes `{ "ok": true, "result": { "ok": true } }`
+
 ## `ws.channels_logout_account_persists`
 
 - Surface: WebSocket `/ws`
