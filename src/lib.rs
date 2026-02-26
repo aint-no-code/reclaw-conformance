@@ -150,6 +150,65 @@ mod tests {
                 ]);
             }
 
+            if methods.as_slice() == ["connect", "chat.send", "chat.abort", "agent.wait"] {
+                let chat_params = frames[1].get("params").ok_or_else(|| {
+                    TransportError::Protocol(
+                        "missing chat.send params in websocket fixture".to_owned(),
+                    )
+                })?;
+                let run_id = chat_params
+                    .get("idempotencyKey")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing chat.send idempotencyKey in websocket fixture".to_owned(),
+                        )
+                    })?;
+                let session_key = chat_params
+                    .get("sessionKey")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing chat.send sessionKey in websocket fixture".to_owned(),
+                        )
+                    })?;
+
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "runId": run_id,
+                            "status": "queued",
+                            "sessionKey": session_key,
+                            "message": Value::Null
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "aborted": true,
+                            "runIds": [run_id]
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "aborted",
+                            "result": {
+                                "output": Value::Null,
+                                "sessionKey": session_key
+                            }
+                        }
+                    }),
+                ]);
+            }
+
             let agent_runs = frames
                 .iter()
                 .filter(|frame| frame.get("method").and_then(Value::as_str) == Some("agent"))
@@ -398,7 +457,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 13);
+        assert_eq!(report.total, 14);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -433,7 +492,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 13);
+        assert_eq!(report.total, 14);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes

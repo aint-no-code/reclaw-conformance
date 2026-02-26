@@ -15,6 +15,7 @@ pub enum Scenario {
     WsAgentDeferredWaitCompletes,
     WsChatSendDeferredWaitCompletes,
     WsChatAbortCancelsDeferredRun,
+    WsChatAbortCancelsDeferredChatSendRun,
     WsChatAbortSessionWideCancelsRuns,
     WsAgentWaitTimeoutForMissingRun,
     WsChatAbortRejectsRunSessionMismatch,
@@ -22,7 +23,7 @@ pub enum Scenario {
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 13] {
+    pub fn all() -> [Self; 14] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
@@ -33,6 +34,7 @@ impl Scenario {
             Self::WsAgentDeferredWaitCompletes,
             Self::WsChatSendDeferredWaitCompletes,
             Self::WsChatAbortCancelsDeferredRun,
+            Self::WsChatAbortCancelsDeferredChatSendRun,
             Self::WsChatAbortSessionWideCancelsRuns,
             Self::WsAgentWaitTimeoutForMissingRun,
             Self::WsChatAbortRejectsRunSessionMismatch,
@@ -58,6 +60,9 @@ impl Scenario {
             }
             Self::WsChatAbortCancelsDeferredRun => {
                 run_ws_chat_abort_cancels_deferred_run(transport)
+            }
+            Self::WsChatAbortCancelsDeferredChatSendRun => {
+                run_ws_chat_abort_cancels_deferred_chat_send_run(transport)
             }
             Self::WsChatAbortSessionWideCancelsRuns => {
                 run_ws_chat_abort_session_wide_cancels_runs(transport)
@@ -592,6 +597,114 @@ fn run_ws_chat_abort_cancels_deferred_run<T: ConformanceTransport>(
             passed: false,
             detail: format!(
                 "expected abort lifecycle, found summary={queued_summary:?}, aborted={abort_ok}, status={wait_status:?}, sessionKey={wait_session_key:?}, outputIsNull={wait_output_is_null}"
+            ),
+        }
+    }
+}
+
+fn run_ws_chat_abort_cancels_deferred_chat_send_run<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.chat_abort_cancels_deferred_chat_send_run";
+    let run_id = unique_run_id("conformance-chat-abort");
+    let session_key = format!("agent:main:{run_id}");
+
+    let connect = ws_connect_frame(&format!("{run_id}-connect"));
+    let chat_send = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-chat-send"),
+        "method": "chat.send",
+        "params": {
+            "sessionKey": session_key,
+            "message": "conformance deferred chat abort",
+            "idempotencyKey": run_id,
+            "deferred": true,
+        }
+    });
+    let abort = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-abort"),
+        "method": "chat.abort",
+        "params": {
+            "runId": run_id,
+            "sessionKey": session_key,
+        }
+    });
+    let wait = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-wait"),
+        "method": "agent.wait",
+        "params": {
+            "runId": run_id,
+            "timeoutMs": 2000
+        }
+    });
+
+    let responses = match transport.websocket_exchange(&[connect, chat_send, abort, wait]) {
+        Ok(responses) => responses,
+        Err(error) => {
+            return ConformanceOutcome {
+                name,
+                passed: false,
+                detail: format!("websocket exchange failed: {error}"),
+            };
+        }
+    };
+    if responses.len() != 4 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 4 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let queued_status = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+    let abort_ok = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("aborted"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let wait_status = responses[3]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+    let wait_output_is_null = responses[3]
+        .get("payload")
+        .and_then(|payload| payload.get("result"))
+        .and_then(|result| result.get("output"))
+        .is_some_and(Value::is_null);
+    let wait_session_key = responses[3]
+        .get("payload")
+        .and_then(|payload| payload.get("result"))
+        .and_then(|result| result.get("sessionKey"))
+        .and_then(Value::as_str);
+
+    if connect_ok
+        && queued_status == Some("queued")
+        && abort_ok
+        && wait_status == Some("aborted")
+        && wait_output_is_null
+        && wait_session_key == Some(session_key.as_str())
+    {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "chat.abort cancels deferred chat.send run and agent.wait reports aborted"
+                .to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected deferred chat.send abort lifecycle, found status={queued_status:?}, aborted={abort_ok}, waitStatus={wait_status:?}, waitOutputIsNull={wait_output_is_null}, sessionKey={wait_session_key:?}"
             ),
         }
     }
