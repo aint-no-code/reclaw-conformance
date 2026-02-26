@@ -20,6 +20,13 @@
 - Requirement: `agent.wait` returns `status == "completed"`
 - Requirement: wait payload includes completed `result.output` and `result.sessionKey`
 
+## `ws.chat_send_deferred_wait_completes`
+
+- Surface: WebSocket `/ws`
+- Requirement: `chat.send` with `deferred=true` returns `status == "queued"` and `message == null`
+- Requirement: `agent.wait` on the idempotency run id returns `status == "completed"`
+- Requirement: wait payload includes completed `result.output` and `result.sessionKey`
+
 ## `ws.chat_abort_cancels_deferred_run`
 
 - Surface: WebSocket `/ws`

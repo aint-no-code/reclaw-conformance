@@ -13,6 +13,7 @@ pub enum Scenario {
     UnknownChannelWebhookNotFound,
     WsHandshakeRequiresConnectFirstFrame,
     WsAgentDeferredWaitCompletes,
+    WsChatSendDeferredWaitCompletes,
     WsChatAbortCancelsDeferredRun,
     WsChatAbortSessionWideCancelsRuns,
     WsAgentWaitTimeoutForMissingRun,
@@ -21,7 +22,7 @@ pub enum Scenario {
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 12] {
+    pub fn all() -> [Self; 13] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
@@ -30,6 +31,7 @@ impl Scenario {
             Self::UnknownChannelWebhookNotFound,
             Self::WsHandshakeRequiresConnectFirstFrame,
             Self::WsAgentDeferredWaitCompletes,
+            Self::WsChatSendDeferredWaitCompletes,
             Self::WsChatAbortCancelsDeferredRun,
             Self::WsChatAbortSessionWideCancelsRuns,
             Self::WsAgentWaitTimeoutForMissingRun,
@@ -51,6 +53,9 @@ impl Scenario {
                 run_ws_handshake_requires_connect_first_frame(transport)
             }
             Self::WsAgentDeferredWaitCompletes => run_ws_agent_deferred_wait_completes(transport),
+            Self::WsChatSendDeferredWaitCompletes => {
+                run_ws_chat_send_deferred_wait_completes(transport)
+            }
             Self::WsChatAbortCancelsDeferredRun => {
                 run_ws_chat_abort_cancels_deferred_run(transport)
             }
@@ -376,6 +381,105 @@ fn run_ws_agent_deferred_wait_completes<T: ConformanceTransport>(
             passed: false,
             detail: format!(
                 "expected queued/completed deferred lifecycle, found summary={queued_summary:?}, status={final_status:?}, output={final_output:?}, sessionKey={final_session_key:?}"
+            ),
+        }
+    }
+}
+
+fn run_ws_chat_send_deferred_wait_completes<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.chat_send_deferred_wait_completes";
+    let run_id = unique_run_id("conformance-chat-deferred");
+    let input = "conformance deferred chat";
+    let session_key = format!("agent:main:{run_id}");
+
+    let connect = ws_connect_frame(&format!("{run_id}-connect"));
+    let chat_send = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-chat-send"),
+        "method": "chat.send",
+        "params": {
+            "sessionKey": session_key,
+            "message": input,
+            "idempotencyKey": run_id,
+            "deferred": true,
+        }
+    });
+    let wait = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-wait"),
+        "method": "agent.wait",
+        "params": {
+            "runId": run_id,
+            "timeoutMs": 2000
+        }
+    });
+
+    let responses = match transport.websocket_exchange(&[connect, chat_send, wait]) {
+        Ok(responses) => responses,
+        Err(error) => {
+            return ConformanceOutcome {
+                name,
+                passed: false,
+                detail: format!("websocket exchange failed: {error}"),
+            };
+        }
+    };
+    if responses.len() != 3 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 3 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let queued_status = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+    let queued_message_is_null = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("message"))
+        .is_some_and(Value::is_null);
+    let wait_status = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+    let wait_output = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("result"))
+        .and_then(|result| result.get("output"))
+        .and_then(Value::as_str);
+    let wait_session_key = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("result"))
+        .and_then(|result| result.get("sessionKey"))
+        .and_then(Value::as_str);
+
+    if connect_ok
+        && queued_status == Some("queued")
+        && queued_message_is_null
+        && wait_status == Some("completed")
+        && wait_output == Some("Echo: conformance deferred chat")
+        && wait_session_key == Some(session_key.as_str())
+    {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "deferred chat.send run transitions queued->completed via agent.wait"
+                .to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected deferred chat.send lifecycle, found status={queued_status:?}, messageIsNull={queued_message_is_null}, waitStatus={wait_status:?}, waitOutput={wait_output:?}, sessionKey={wait_session_key:?}"
             ),
         }
     }
