@@ -24,6 +24,7 @@
 - `ws.agent_wait_timeout_for_missing_run`: `agent.wait` for unknown runs must return `status == "timeout"`
 - `ws.chat_abort_rejects_run_session_mismatch`: `chat.abort` must reject `runId` cancellation when `sessionKey` does not match
 - `ws.chat_abort_completed_run_noop`: `chat.abort` on completed runs must return `aborted == false`
+- `ws.chat_abort_unknown_run_noop`: `chat.abort` for unknown runs must be a no-op and `agent.wait` must remain `timeout`
 
 ## Run
 

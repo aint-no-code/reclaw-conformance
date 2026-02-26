@@ -104,3 +104,10 @@
 - Surface: WebSocket `/ws`
 - Requirement: once `agent.wait` reports `completed`, subsequent `chat.abort` is a no-op
 - Requirement: abort response is `ok == true`, `aborted == false`, with `runIds` including the target run
+
+## `ws.chat_abort_unknown_run_noop`
+
+- Surface: WebSocket `/ws`
+- Requirement: aborting an unknown `runId` returns `ok == true` with `aborted == false`
+- Requirement: abort response includes the requested run id in `runIds`
+- Requirement: `agent.wait` for the same unknown run still returns `status == "timeout"`

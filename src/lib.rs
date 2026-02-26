@@ -465,6 +465,54 @@ mod tests {
                 ]);
             }
 
+            if methods.as_slice() == ["connect", "chat.abort", "agent.wait"] {
+                let abort_params = frames[1].get("params").ok_or_else(|| {
+                    TransportError::Protocol(
+                        "missing chat.abort params in websocket fixture".to_owned(),
+                    )
+                })?;
+                let run_id = abort_params
+                    .get("runId")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing chat.abort runId in websocket fixture".to_owned(),
+                        )
+                    })?;
+                let session_key = abort_params
+                    .get("sessionKey")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing chat.abort sessionKey in websocket fixture".to_owned(),
+                        )
+                    })?;
+
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "aborted": false,
+                            "sessionKey": session_key,
+                            "runIds": [run_id]
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "runId": run_id,
+                            "status": "timeout"
+                        }
+                    }),
+                ]);
+            }
+
             let agent_runs = frames
                 .iter()
                 .filter(|frame| frame.get("method").and_then(Value::as_str) == Some("agent"))
@@ -731,7 +779,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 20);
+        assert_eq!(report.total, 21);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -784,7 +832,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 20);
+        assert_eq!(report.total, 21);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes
