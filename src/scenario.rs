@@ -15,10 +15,13 @@ pub enum Scenario {
     WsAgentDeferredWaitCompletes,
     WsChatAbortCancelsDeferredRun,
     WsChatAbortSessionWideCancelsRuns,
+    WsAgentWaitTimeoutForMissingRun,
+    WsChatAbortRejectsRunSessionMismatch,
+    WsChatAbortCompletedRunNoop,
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 9] {
+    pub fn all() -> [Self; 12] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
@@ -29,6 +32,9 @@ impl Scenario {
             Self::WsAgentDeferredWaitCompletes,
             Self::WsChatAbortCancelsDeferredRun,
             Self::WsChatAbortSessionWideCancelsRuns,
+            Self::WsAgentWaitTimeoutForMissingRun,
+            Self::WsChatAbortRejectsRunSessionMismatch,
+            Self::WsChatAbortCompletedRunNoop,
         ]
     }
 
@@ -51,6 +57,13 @@ impl Scenario {
             Self::WsChatAbortSessionWideCancelsRuns => {
                 run_ws_chat_abort_session_wide_cancels_runs(transport)
             }
+            Self::WsAgentWaitTimeoutForMissingRun => {
+                run_ws_agent_wait_timeout_for_missing_run(transport)
+            }
+            Self::WsChatAbortRejectsRunSessionMismatch => {
+                run_ws_chat_abort_rejects_run_session_mismatch(transport)
+            }
+            Self::WsChatAbortCompletedRunNoop => run_ws_chat_abort_completed_run_noop(transport),
         }
     }
 }
@@ -621,6 +634,262 @@ fn run_ws_chat_abort_session_wide_cancels_runs<T: ConformanceTransport>(
             passed: false,
             detail: format!(
                 "expected session-wide abort lifecycle, found queuedOne={queued_one:?}, queuedTwo={queued_two:?}, aborted={abort_ok}, hasRunOne={has_run_one}, hasRunTwo={has_run_two}, waitOne={wait_one_status:?}, waitTwo={wait_two_status:?}"
+            ),
+        }
+    }
+}
+
+fn run_ws_agent_wait_timeout_for_missing_run<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.agent_wait_timeout_for_missing_run";
+    let run_id = unique_run_id("conformance-missing");
+    let connect = ws_connect_frame(&format!("{run_id}-connect"));
+    let wait = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-wait"),
+        "method": "agent.wait",
+        "params": {
+            "runId": run_id,
+            "timeoutMs": 50
+        }
+    });
+
+    let responses = match transport.websocket_exchange(&[connect, wait]) {
+        Ok(responses) => responses,
+        Err(error) => {
+            return ConformanceOutcome {
+                name,
+                passed: false,
+                detail: format!("websocket exchange failed: {error}"),
+            };
+        }
+    };
+    if responses.len() != 2 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 2 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let wait_status = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+    let wait_run_id = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("runId"))
+        .and_then(Value::as_str);
+
+    if connect_ok && wait_status == Some("timeout") && wait_run_id == Some(run_id.as_str()) {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "agent.wait returns timeout for unknown run ids".to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected timeout for unknown run, found status={wait_status:?}, runId={wait_run_id:?}"
+            ),
+        }
+    }
+}
+
+fn run_ws_chat_abort_rejects_run_session_mismatch<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.chat_abort_rejects_run_session_mismatch";
+    let run_id = unique_run_id("conformance-mismatch");
+    let session_key = format!("agent:main:{run_id}");
+
+    let connect = ws_connect_frame(&format!("{run_id}-connect"));
+    let agent = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-agent"),
+        "method": "agent",
+        "params": {
+            "runId": run_id,
+            "sessionKey": session_key,
+            "agentId": "main",
+            "input": "session mismatch",
+            "deferred": true,
+        }
+    });
+    let abort = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-abort"),
+        "method": "chat.abort",
+        "params": {
+            "runId": run_id,
+            "sessionKey": format!("{session_key}-other"),
+        }
+    });
+
+    let responses = match transport.websocket_exchange(&[connect, agent, abort]) {
+        Ok(responses) => responses,
+        Err(error) => {
+            return ConformanceOutcome {
+                name,
+                passed: false,
+                detail: format!("websocket exchange failed: {error}"),
+            };
+        }
+    };
+    if responses.len() != 3 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 3 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let queued_summary = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("summary"))
+        .and_then(Value::as_str);
+    let abort_ok = responses[2]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let abort_error = responses[2]
+        .get("error")
+        .and_then(|payload| payload.get("code"))
+        .and_then(Value::as_str);
+
+    if connect_ok
+        && queued_summary == Some("queued")
+        && !abort_ok
+        && abort_error == Some("INVALID_REQUEST")
+    {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "chat.abort rejects runId when sessionKey does not match".to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected INVALID_REQUEST on mismatched sessionKey, found queued={queued_summary:?}, ok={abort_ok}, code={abort_error:?}"
+            ),
+        }
+    }
+}
+
+fn run_ws_chat_abort_completed_run_noop<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "ws.chat_abort_completed_run_noop";
+    let run_id = unique_run_id("conformance-completed");
+    let session_key = format!("agent:main:{run_id}");
+
+    let connect = ws_connect_frame(&format!("{run_id}-connect"));
+    let agent = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-agent"),
+        "method": "agent",
+        "params": {
+            "runId": run_id,
+            "sessionKey": session_key,
+            "agentId": "main",
+            "input": "complete then abort",
+            "deferred": true,
+        }
+    });
+    let wait = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-wait"),
+        "method": "agent.wait",
+        "params": {
+            "runId": run_id,
+            "timeoutMs": 2000
+        }
+    });
+    let abort = serde_json::json!({
+        "type": "req",
+        "id": format!("{run_id}-abort"),
+        "method": "chat.abort",
+        "params": {
+            "runId": run_id,
+            "sessionKey": session_key,
+        }
+    });
+
+    let responses = match transport.websocket_exchange(&[connect, agent, wait, abort]) {
+        Ok(responses) => responses,
+        Err(error) => {
+            return ConformanceOutcome {
+                name,
+                passed: false,
+                detail: format!("websocket exchange failed: {error}"),
+            };
+        }
+    };
+    if responses.len() != 4 {
+        return ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("expected 4 websocket responses, found {}", responses.len()),
+        };
+    }
+
+    let connect_ok = responses[0]
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let queued_summary = responses[1]
+        .get("payload")
+        .and_then(|payload| payload.get("summary"))
+        .and_then(Value::as_str);
+    let wait_status = responses[2]
+        .get("payload")
+        .and_then(|payload| payload.get("status"))
+        .and_then(Value::as_str);
+    let abort_aborted = responses[3]
+        .get("payload")
+        .and_then(|payload| payload.get("aborted"))
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let abort_run_ids = responses[3]
+        .get("payload")
+        .and_then(|payload| payload.get("runIds"))
+        .and_then(Value::as_array);
+    let run_id_present = abort_run_ids.is_some_and(|values| {
+        values
+            .iter()
+            .any(|value| value.as_str() == Some(run_id.as_str()))
+    });
+
+    if connect_ok
+        && queued_summary == Some("queued")
+        && wait_status == Some("completed")
+        && !abort_aborted
+        && run_id_present
+    {
+        ConformanceOutcome {
+            name,
+            passed: true,
+            detail: "chat.abort is a no-op for completed runs".to_owned(),
+        }
+    } else {
+        ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!(
+                "expected completed-run abort no-op, found queued={queued_summary:?}, wait={wait_status:?}, aborted={abort_aborted}, runIdPresent={run_id_present}"
             ),
         }
     }

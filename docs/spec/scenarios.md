@@ -33,3 +33,21 @@
 - Requirement: `chat.abort` without `runId` cancels all queued/running runs for the session
 - Requirement: abort response `runIds` includes all canceled runs
 - Requirement: `agent.wait` on each canceled run returns `status == "aborted"`
+
+## `ws.agent_wait_timeout_for_missing_run`
+
+- Surface: WebSocket `/ws`
+- Requirement: `agent.wait` on unknown `runId` returns `status == "timeout"`
+- Requirement: timeout payload echoes the requested `runId`
+
+## `ws.chat_abort_rejects_run_session_mismatch`
+
+- Surface: WebSocket `/ws`
+- Requirement: aborting by `runId` with a different `sessionKey` fails
+- Requirement: response is `ok == false` with `error.code == "INVALID_REQUEST"`
+
+## `ws.chat_abort_completed_run_noop`
+
+- Surface: WebSocket `/ws`
+- Requirement: once `agent.wait` reports `completed`, subsequent `chat.abort` is a no-op
+- Requirement: abort response is `ok == true`, `aborted == false`, with `runIds` including the target run

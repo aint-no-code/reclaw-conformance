@@ -61,6 +61,43 @@ mod tests {
         }
 
         fn websocket_exchange(&self, frames: &[Value]) -> Result<Vec<Value>, TransportError> {
+            let methods = frames
+                .iter()
+                .map(|frame| {
+                    frame.get("method").and_then(Value::as_str).ok_or_else(|| {
+                        TransportError::Protocol("missing method in websocket fixture".to_owned())
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+
+            if methods.as_slice() == ["connect", "agent.wait"] {
+                let wait_run_id = frames[1]
+                    .get("params")
+                    .and_then(|params| params.get("runId"))
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing wait runId in websocket fixture".to_owned(),
+                        )
+                    })?;
+
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "runId": wait_run_id,
+                            "status": "timeout"
+                        }
+                    }),
+                ]);
+            }
+
             let agent_runs = frames
                 .iter()
                 .filter(|frame| frame.get("method").and_then(Value::as_str) == Some("agent"))
@@ -94,60 +131,125 @@ mod tests {
             let (run_id, session_key) = agent_runs.first().cloned().ok_or_else(|| {
                 TransportError::Protocol("missing agent frame in websocket fixture".to_owned())
             })?;
-            let has_chat_abort = frames
-                .iter()
-                .any(|frame| frame.get("method").and_then(Value::as_str) == Some("chat.abort"));
-            if has_chat_abort {
-                if agent_runs.len() > 1 {
-                    let second_run_id = &agent_runs[1].0;
-                    return Ok(vec![
-                        json!({
-                            "ok": true,
-                            "payload": {
-                                "type": "hello-ok"
+
+            if methods.as_slice() == ["connect", "agent", "chat.abort"] {
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": false,
+                        "error": {
+                            "code": "INVALID_REQUEST"
+                        }
+                    }),
+                ]);
+            }
+
+            if methods.as_slice() == ["connect", "agent", "agent.wait", "chat.abort"] {
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "completed",
+                            "result": {
+                                "output": "Echo: complete then abort",
+                                "sessionKey": session_key
                             }
-                        }),
-                        json!({
-                            "ok": true,
-                            "payload": {
-                                "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "aborted": false,
+                            "runIds": [run_id]
+                        }
+                    }),
+                ]);
+            }
+
+            if methods.as_slice()
+                == [
+                    "connect",
+                    "agent",
+                    "agent",
+                    "chat.abort",
+                    "agent.wait",
+                    "agent.wait",
+                ]
+            {
+                let second_run_id = &agent_runs[1].0;
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "aborted": true,
+                            "runIds": [run_id, second_run_id]
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "aborted",
+                            "result": {
+                                "output": Value::Null,
+                                "sessionKey": session_key
                             }
-                        }),
-                        json!({
-                            "ok": true,
-                            "payload": {
-                                "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "aborted",
+                            "result": {
+                                "output": Value::Null,
+                                "sessionKey": session_key
                             }
-                        }),
-                        json!({
-                            "ok": true,
-                            "payload": {
-                                "aborted": true,
-                                "runIds": [run_id, second_run_id]
-                            }
-                        }),
-                        json!({
-                            "ok": true,
-                            "payload": {
-                                "status": "aborted",
-                                "result": {
-                                    "output": Value::Null,
-                                    "sessionKey": session_key
-                                }
-                            }
-                        }),
-                        json!({
-                            "ok": true,
-                            "payload": {
-                                "status": "aborted",
-                                "result": {
-                                    "output": Value::Null,
-                                    "sessionKey": session_key
-                                }
-                            }
-                        }),
-                    ]);
-                }
+                        }
+                    }),
+                ]);
+            }
+
+            if methods.as_slice() == ["connect", "agent", "chat.abort", "agent.wait"] {
                 return Ok(vec![
                     json!({
                         "ok": true,
@@ -181,30 +283,36 @@ mod tests {
                 ]);
             }
 
-            Ok(vec![
-                json!({
-                    "ok": true,
-                    "payload": {
-                        "type": "hello-ok"
-                    }
-                }),
-                json!({
-                    "ok": true,
-                    "payload": {
-                        "summary": "queued"
-                    }
-                }),
-                json!({
-                    "ok": true,
-                    "payload": {
-                        "status": "completed",
-                        "result": {
-                            "output": "Echo: conformance deferred",
-                            "sessionKey": session_key
+            if methods.as_slice() == ["connect", "agent", "agent.wait"] {
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
                         }
-                    }
-                }),
-            ])
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "completed",
+                            "result": {
+                                "output": "Echo: conformance deferred",
+                                "sessionKey": session_key
+                            }
+                        }
+                    }),
+                ]);
+            }
+
+            Err(TransportError::Protocol(format!(
+                "unsupported websocket fixture methods: {methods:?}"
+            )))
         }
     }
 
@@ -238,7 +346,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 9);
+        assert_eq!(report.total, 12);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -273,7 +381,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 9);
+        assert_eq!(report.total, 12);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes
