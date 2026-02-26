@@ -41,6 +41,13 @@
 - Requirement: `agent.wait` returns `status == "aborted"`
 - Requirement: aborted wait payload keeps `result.output == null`
 
+## `ws.chat_abort_session_wide_cancels_deferred_chat_send_runs`
+
+- Surface: WebSocket `/ws`
+- Requirement: `chat.abort` without `runId` cancels all deferred `chat.send` runs in the same session
+- Requirement: abort response `runIds` includes all canceled run ids
+- Requirement: `agent.wait` on each canceled run returns `status == "aborted"`
+
 ## `ws.chat_abort_session_wide_cancels_runs`
 
 - Surface: WebSocket `/ws`

@@ -209,6 +209,108 @@ mod tests {
                 ]);
             }
 
+            if methods.as_slice()
+                == [
+                    "connect",
+                    "chat.send",
+                    "chat.send",
+                    "chat.abort",
+                    "agent.wait",
+                    "agent.wait",
+                ]
+            {
+                let first_params = frames[1].get("params").ok_or_else(|| {
+                    TransportError::Protocol(
+                        "missing first chat.send params in websocket fixture".to_owned(),
+                    )
+                })?;
+                let second_params = frames[2].get("params").ok_or_else(|| {
+                    TransportError::Protocol(
+                        "missing second chat.send params in websocket fixture".to_owned(),
+                    )
+                })?;
+                let run_id_one = first_params
+                    .get("idempotencyKey")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing first chat.send idempotencyKey in websocket fixture"
+                                .to_owned(),
+                        )
+                    })?;
+                let run_id_two = second_params
+                    .get("idempotencyKey")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing second chat.send idempotencyKey in websocket fixture"
+                                .to_owned(),
+                        )
+                    })?;
+                let session_key = first_params
+                    .get("sessionKey")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing chat.send sessionKey in websocket fixture".to_owned(),
+                        )
+                    })?;
+
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "runId": run_id_one,
+                            "status": "queued",
+                            "sessionKey": session_key,
+                            "message": Value::Null
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "runId": run_id_two,
+                            "status": "queued",
+                            "sessionKey": session_key,
+                            "message": Value::Null
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "aborted": true,
+                            "runIds": [run_id_one, run_id_two]
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "aborted",
+                            "result": {
+                                "output": Value::Null,
+                                "sessionKey": session_key
+                            }
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "aborted",
+                            "result": {
+                                "output": Value::Null,
+                                "sessionKey": session_key
+                            }
+                        }
+                    }),
+                ]);
+            }
+
             let agent_runs = frames
                 .iter()
                 .filter(|frame| frame.get("method").and_then(Value::as_str) == Some("agent"))
@@ -457,7 +559,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 14);
+        assert_eq!(report.total, 15);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -492,7 +594,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 14);
+        assert_eq!(report.total, 15);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes

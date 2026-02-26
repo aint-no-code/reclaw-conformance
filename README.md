@@ -14,6 +14,7 @@
 - `ws.chat_send_deferred_wait_completes`: deferred `chat.send` runs must return `queued` and complete through `agent.wait`
 - `ws.chat_abort_cancels_deferred_run`: `chat.abort` must cancel deferred runs and `agent.wait` must report `aborted`
 - `ws.chat_abort_cancels_deferred_chat_send_run`: `chat.abort` must cancel deferred `chat.send` runs and `agent.wait` must report `aborted`
+- `ws.chat_abort_session_wide_cancels_deferred_chat_send_runs`: `chat.abort` without `runId` must cancel all deferred `chat.send` runs in a session
 - `ws.chat_abort_session_wide_cancels_runs`: `chat.abort` without `runId` must cancel all non-terminal runs for the session
 - `ws.agent_wait_timeout_for_missing_run`: `agent.wait` for unknown runs must return `status == "timeout"`
 - `ws.chat_abort_rejects_run_session_mismatch`: `chat.abort` must reject `runId` cancellation when `sessionKey` does not match
