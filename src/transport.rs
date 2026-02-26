@@ -9,6 +9,7 @@ pub trait ConformanceTransport {
     fn get_json(&self, path: &str) -> Result<Value, TransportError>;
     fn post_json(&self, path: &str, body: &Value) -> Result<(u16, Value), TransportError>;
     fn websocket_first_response(&self, frame: &Value) -> Result<Value, TransportError>;
+    fn websocket_exchange(&self, frames: &[Value]) -> Result<Vec<Value>, TransportError>;
 }
 
 pub struct HttpTransport {
@@ -79,6 +80,26 @@ impl ConformanceTransport for HttpTransport {
 
         send_ws_json(&mut socket, frame)?;
         read_ws_json(&mut socket)
+    }
+
+    fn websocket_exchange(&self, frames: &[Value]) -> Result<Vec<Value>, TransportError> {
+        if frames.is_empty() {
+            return Err(TransportError::Protocol(
+                "websocket exchange requires at least one frame".to_owned(),
+            ));
+        }
+
+        let ws_url = websocket_url(&self.base_url);
+        let (mut socket, _) = connect(ws_url.as_str())
+            .map_err(|error| TransportError::Http(format!("websocket connect failed: {error}")))?;
+
+        let mut responses = Vec::with_capacity(frames.len());
+        for frame in frames {
+            send_ws_json(&mut socket, frame)?;
+            responses.push(read_ws_json(&mut socket)?);
+        }
+
+        Ok(responses)
     }
 }
 

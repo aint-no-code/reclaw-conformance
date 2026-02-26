@@ -59,6 +59,88 @@ mod tests {
                 TransportError::Protocol("missing websocket response fixture".to_owned())
             })
         }
+
+        fn websocket_exchange(&self, frames: &[Value]) -> Result<Vec<Value>, TransportError> {
+            let run_id = frames
+                .iter()
+                .find(|frame| frame.get("method").and_then(Value::as_str) == Some("agent"))
+                .and_then(|frame| frame.get("params"))
+                .and_then(|params| params.get("runId"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    TransportError::Protocol("missing runId in websocket fixture".to_owned())
+                })?;
+            let session_key = frames
+                .iter()
+                .find(|frame| frame.get("method").and_then(Value::as_str) == Some("agent"))
+                .and_then(|frame| frame.get("params"))
+                .and_then(|params| params.get("sessionKey"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    TransportError::Protocol("missing sessionKey in websocket fixture".to_owned())
+                })?;
+            let has_chat_abort = frames
+                .iter()
+                .any(|frame| frame.get("method").and_then(Value::as_str) == Some("chat.abort"));
+            if has_chat_abort {
+                return Ok(vec![
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "type": "hello-ok"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "summary": "queued"
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "aborted": true,
+                            "runIds": [run_id]
+                        }
+                    }),
+                    json!({
+                        "ok": true,
+                        "payload": {
+                            "status": "aborted",
+                            "result": {
+                                "output": Value::Null,
+                                "sessionKey": session_key
+                            }
+                        }
+                    }),
+                ]);
+            }
+
+            Ok(vec![
+                json!({
+                    "ok": true,
+                    "payload": {
+                        "type": "hello-ok"
+                    }
+                }),
+                json!({
+                    "ok": true,
+                    "payload": {
+                        "summary": "queued"
+                    }
+                }),
+                json!({
+                    "ok": true,
+                    "payload": {
+                        "status": "completed",
+                        "result": {
+                            "output": "Echo: conformance deferred",
+                            "sessionKey": session_key
+                        }
+                    }
+                }),
+            ])
+        }
     }
 
     #[test]
@@ -91,7 +173,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 6);
+        assert_eq!(report.total, 8);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -126,7 +208,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 6);
+        assert_eq!(report.total, 8);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes
