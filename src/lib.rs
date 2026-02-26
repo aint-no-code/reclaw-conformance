@@ -24,6 +24,7 @@ mod tests {
         info: Option<Value>,
         unknown_webhook: Option<(u16, Value)>,
         tools_invoke: Option<(u16, Value)>,
+        tools_invoke_unknown: Option<(u16, Value)>,
         websocket_response: Option<Value>,
     }
 
@@ -57,6 +58,13 @@ mod tests {
                             "missing tools invoke tool in fixture request".to_owned(),
                         )
                     })?;
+                    if tool != "gateway.request" {
+                        return self.tools_invoke_unknown.clone().ok_or_else(|| {
+                            TransportError::Protocol(
+                                "missing tools invoke unknown fixture".to_owned(),
+                            )
+                        });
+                    }
                     let method = body
                         .get("args")
                         .and_then(|args| args.get("method"))
@@ -67,7 +75,7 @@ mod tests {
                                 "missing tools invoke method/action in fixture request".to_owned(),
                             )
                         })?;
-                    if tool != "gateway.request" || method != "health" {
+                    if method != "health" {
                         return Err(TransportError::Protocol(format!(
                             "unexpected tools invoke payload: tool={tool}, method={method}"
                         )));
@@ -702,6 +710,15 @@ mod tests {
                     }
                 }),
             )),
+            tools_invoke_unknown: Some((
+                404,
+                json!({
+                    "ok": false,
+                    "error": {
+                        "type": "not_found"
+                    }
+                }),
+            )),
             websocket_response: Some(json!({
                 "type": "res",
                 "id": "conformance-handshake-invalid-1",
@@ -714,7 +731,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 19);
+        assert_eq!(report.total, 20);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -746,6 +763,15 @@ mod tests {
                     }
                 }),
             )),
+            tools_invoke_unknown: Some((
+                404,
+                json!({
+                    "ok": false,
+                    "error": {
+                        "type": "not_found"
+                    }
+                }),
+            )),
             websocket_response: Some(json!({
                 "type": "res",
                 "id": "conformance-handshake-invalid-1",
@@ -758,7 +784,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 19);
+        assert_eq!(report.total, 20);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes

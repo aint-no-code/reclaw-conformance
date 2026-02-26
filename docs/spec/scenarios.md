@@ -32,6 +32,12 @@
 - Requirement: `tool == "gateway.request"` with `action == "health"` and empty `args` returns HTTP `200`
 - Requirement: response includes `{ "ok": true, "result": { "ok": true } }`
 
+## `tools.invoke_rejects_unknown_tool`
+
+- Endpoint: `POST /tools/invoke`
+- Requirement: unknown tool names return HTTP `404`
+- Requirement: response includes `{ "ok": false, "error": { "type": "not_found" } }`
+
 ## `ws.channels_logout_account_persists`
 
 - Surface: WebSocket `/ws`

@@ -11,6 +11,7 @@
 - `channels.unknown_webhook_not_found`: unknown channel webhooks must return HTTP `404` with `error.code == "NOT_FOUND"`
 - `tools.invoke_gateway_request`: `/tools/invoke` with `gateway.request` health dispatch must return `ok == true` and `result.ok == true`
 - `tools.invoke_gateway_request_action_fallback`: `/tools/invoke` with `gateway.request` and top-level `action` fallback must dispatch successfully
+- `tools.invoke_rejects_unknown_tool`: `/tools/invoke` must reject unknown tools with HTTP `404` and `error.type == "not_found"`
 - `ws.handshake_requires_connect_first_frame`: WS gateway must reject a non-`connect` first request with `INVALID_REQUEST`
 - `ws.channels_status_includes_account_views`: `channels.status` must expose account-aware summary views (`channelsById`, `channelAccounts`, `channelDefaultAccountId`)
 - `ws.channels_logout_account_persists`: `channels.logout` with `accountId` must persist account-specific disconnected state

@@ -13,6 +13,7 @@ pub enum Scenario {
     UnknownChannelWebhookNotFound,
     ToolsInvokeGatewayRequest,
     ToolsInvokeGatewayRequestActionFallback,
+    ToolsInvokeRejectsUnknownTool,
     WsHandshakeRequiresConnectFirstFrame,
     WsChannelsStatusIncludesAccountViews,
     WsChannelsLogoutAccountPersists,
@@ -28,7 +29,7 @@ pub enum Scenario {
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 19] {
+    pub fn all() -> [Self; 20] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
@@ -37,6 +38,7 @@ impl Scenario {
             Self::UnknownChannelWebhookNotFound,
             Self::ToolsInvokeGatewayRequest,
             Self::ToolsInvokeGatewayRequestActionFallback,
+            Self::ToolsInvokeRejectsUnknownTool,
             Self::WsHandshakeRequiresConnectFirstFrame,
             Self::WsChannelsStatusIncludesAccountViews,
             Self::WsChannelsLogoutAccountPersists,
@@ -65,6 +67,7 @@ impl Scenario {
             Self::ToolsInvokeGatewayRequestActionFallback => {
                 run_tools_invoke_gateway_request_action_fallback(transport)
             }
+            Self::ToolsInvokeRejectsUnknownTool => run_tools_invoke_rejects_unknown_tool(transport),
             Self::WsHandshakeRequiresConnectFirstFrame => {
                 run_ws_handshake_requires_connect_first_frame(transport)
             }
@@ -352,6 +355,46 @@ fn run_tools_invoke_gateway_request_action_fallback<T: ConformanceTransport>(
             name,
             passed: false,
             detail: format!("tools invoke action fallback request failed: {error}"),
+        },
+    }
+}
+
+fn run_tools_invoke_rejects_unknown_tool<T: ConformanceTransport>(
+    transport: &T,
+) -> ConformanceOutcome {
+    let name = "tools.invoke_rejects_unknown_tool";
+    let payload = serde_json::json!({
+        "tool": "unknown.tool",
+        "args": {}
+    });
+
+    match transport.post_json("/tools/invoke", &payload) {
+        Ok((status, body)) => {
+            let ok = body.get("ok").and_then(Value::as_bool).unwrap_or(true);
+            let error_type = body
+                .get("error")
+                .and_then(|error| error.get("type"))
+                .and_then(Value::as_str);
+            if status == 404 && !ok && error_type == Some("not_found") {
+                ConformanceOutcome {
+                    name,
+                    passed: true,
+                    detail: "tools invoke rejects unknown tool names with 404 not_found".to_owned(),
+                }
+            } else {
+                ConformanceOutcome {
+                    name,
+                    passed: false,
+                    detail: format!(
+                        "expected status=404, ok=false, error.type=not_found; found status={status}, ok={ok}, error.type={error_type:?}"
+                    ),
+                }
+            }
+        }
+        Err(error) => ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("tools invoke unknown tool request failed: {error}"),
         },
     }
 }
