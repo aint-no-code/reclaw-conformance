@@ -11,6 +11,7 @@ pub enum Scenario {
     InfoProtocolVersion,
     InfoMethodsIncludeHealthAndStatus,
     UnknownChannelWebhookNotFound,
+    ToolsInvokeGatewayRequest,
     WsHandshakeRequiresConnectFirstFrame,
     WsChannelsStatusIncludesAccountViews,
     WsChannelsLogoutAccountPersists,
@@ -26,13 +27,14 @@ pub enum Scenario {
 }
 
 impl Scenario {
-    pub fn all() -> [Self; 17] {
+    pub fn all() -> [Self; 18] {
         [
             Self::HealthzOkTrue,
             Self::ReadyzOkTrue,
             Self::InfoProtocolVersion,
             Self::InfoMethodsIncludeHealthAndStatus,
             Self::UnknownChannelWebhookNotFound,
+            Self::ToolsInvokeGatewayRequest,
             Self::WsHandshakeRequiresConnectFirstFrame,
             Self::WsChannelsStatusIncludesAccountViews,
             Self::WsChannelsLogoutAccountPersists,
@@ -57,6 +59,7 @@ impl Scenario {
                 run_info_methods_include_health_and_status(transport)
             }
             Self::UnknownChannelWebhookNotFound => run_unknown_channel_webhook_not_found(transport),
+            Self::ToolsInvokeGatewayRequest => run_tools_invoke_gateway_request(transport),
             Self::WsHandshakeRequiresConnectFirstFrame => {
                 run_ws_handshake_requires_connect_first_frame(transport)
             }
@@ -262,6 +265,47 @@ fn run_unknown_channel_webhook_not_found<T: ConformanceTransport>(
             name,
             passed: false,
             detail: format!("unknown channel webhook request failed: {error}"),
+        },
+    }
+}
+
+fn run_tools_invoke_gateway_request<T: ConformanceTransport>(transport: &T) -> ConformanceOutcome {
+    let name = "tools.invoke_gateway_request";
+    let payload = serde_json::json!({
+        "tool": "gateway.request",
+        "args": {
+            "method": "health",
+            "params": {}
+        }
+    });
+
+    match transport.post_json("/tools/invoke", &payload) {
+        Ok((status, body)) => {
+            let ok = body.get("ok").and_then(Value::as_bool).unwrap_or(false);
+            let result_ok = body
+                .get("result")
+                .and_then(|result| result.get("ok"))
+                .and_then(Value::as_bool);
+            if status == 200 && ok && result_ok == Some(true) {
+                ConformanceOutcome {
+                    name,
+                    passed: true,
+                    detail: "tools invoke gateway.request dispatches health".to_owned(),
+                }
+            } else {
+                ConformanceOutcome {
+                    name,
+                    passed: false,
+                    detail: format!(
+                        "expected status=200, ok=true, result.ok=true; found status={status}, ok={ok}, result.ok={result_ok:?}"
+                    ),
+                }
+            }
+        }
+        Err(error) => ConformanceOutcome {
+            name,
+            passed: false,
+            detail: format!("tools invoke request failed: {error}"),
         },
     }
 }

@@ -20,6 +20,12 @@
 - Requirement: response includes account-aware views: `channelsById`, `channelAccounts`, `channelDefaultAccountId`
 - Requirement: default `webchat` account is represented as `channelDefaultAccountId.webchat == "default"`
 
+## `tools.invoke_gateway_request`
+
+- Endpoint: `POST /tools/invoke`
+- Requirement: `tool == "gateway.request"` with `args.method == "health"` returns HTTP `200`
+- Requirement: response includes `{ "ok": true, "result": { "ok": true } }`
+
 ## `ws.channels_logout_account_persists`
 
 - Surface: WebSocket `/ws`

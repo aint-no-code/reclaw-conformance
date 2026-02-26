@@ -23,6 +23,7 @@ mod tests {
         readyz: Option<Value>,
         info: Option<Value>,
         unknown_webhook: Option<(u16, Value)>,
+        tools_invoke: Option<(u16, Value)>,
         websocket_response: Option<Value>,
     }
 
@@ -45,11 +46,35 @@ mod tests {
             }
         }
 
-        fn post_json(&self, path: &str, _body: &Value) -> Result<(u16, Value), TransportError> {
+        fn post_json(&self, path: &str, body: &Value) -> Result<(u16, Value), TransportError> {
             match path {
                 "/channels/nonexistent/webhook" => self.unknown_webhook.clone().ok_or_else(|| {
                     TransportError::Protocol("missing unknown webhook fixture".to_owned())
                 }),
+                "/tools/invoke" => {
+                    let tool = body.get("tool").and_then(Value::as_str).ok_or_else(|| {
+                        TransportError::Protocol(
+                            "missing tools invoke tool in fixture request".to_owned(),
+                        )
+                    })?;
+                    let method = body
+                        .get("args")
+                        .and_then(|args| args.get("method"))
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            TransportError::Protocol(
+                                "missing tools invoke method in fixture request".to_owned(),
+                            )
+                        })?;
+                    if tool != "gateway.request" || method != "health" {
+                        return Err(TransportError::Protocol(format!(
+                            "unexpected tools invoke payload: tool={tool}, method={method}"
+                        )));
+                    }
+                    self.tools_invoke.clone().ok_or_else(|| {
+                        TransportError::Protocol("missing tools invoke fixture".to_owned())
+                    })
+                }
                 _ => Err(TransportError::Protocol("unknown path".to_owned())),
             }
         }
@@ -667,6 +692,15 @@ mod tests {
                     }
                 }),
             )),
+            tools_invoke: Some((
+                200,
+                json!({
+                    "ok": true,
+                    "result": {
+                        "ok": true
+                    }
+                }),
+            )),
             websocket_response: Some(json!({
                 "type": "res",
                 "id": "conformance-handshake-invalid-1",
@@ -679,7 +713,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 17);
+        assert_eq!(report.total, 18);
         assert_eq!(report.failed, 0);
         assert!(report.outcomes.iter().all(|outcome| outcome.passed));
     }
@@ -702,6 +736,15 @@ mod tests {
                     }
                 }),
             )),
+            tools_invoke: Some((
+                200,
+                json!({
+                    "ok": true,
+                    "result": {
+                        "ok": true
+                    }
+                }),
+            )),
             websocket_response: Some(json!({
                 "type": "res",
                 "id": "conformance-handshake-invalid-1",
@@ -714,7 +757,7 @@ mod tests {
 
         let report = ConformanceRunner::new(transport).run();
 
-        assert_eq!(report.total, 17);
+        assert_eq!(report.total, 18);
         assert_eq!(report.failed, 1);
         let protocol_case = report
             .outcomes
